@@ -157,6 +157,13 @@ register(
     max_episode_steps=200,
 )
 
+register(
+    id="Taxi-v3",
+    entry_point="gymnasium.envs.toy_text.taxi_two:TaxiEnv",
+    reward_threshold=8,  # optimum = Undetermined
+    max_episode_steps=200,
+)
+
 
 # Tabular
 # ----------------------------------------
