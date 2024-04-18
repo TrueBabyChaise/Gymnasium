@@ -66,9 +66,9 @@ class TaxiEnv(Env):
     - 5: Drop off passenger
 
     ## Observation Space
-    There are 500 discrete states since there are 25 taxi positions, 5 possible
-    locations of the passenger (including the case when the passenger is in the
-    taxi), and 4 destination locations.
+    There are 10000 discrete states since there are 25 taxi positions, 2 * 5 possible
+    locations of each passenger (including the case when the passenger is in the
+    taxi), and 2 * 4 for each passengers destination locations.
 
     Destination on the map are represented with the first letter of the color.
 
@@ -86,7 +86,7 @@ class TaxiEnv(Env):
     - 3: Blue
 
     An observation is returned as an `int()` that encodes the corresponding state, calculated by
-    `((taxi_row * 5 + taxi_col) * 5 + passenger_location) * 4 + destination`
+    `((((taxi_row * 5 + taxi_col) * 5 + passenger_location) * 4 + destination) * 5 + second_location) * 4 + second_destination`.
 
     Note that there are 400 states that can actually be reached during an
     episode. The missing states correspond to situations in which the passenger
@@ -162,7 +162,7 @@ class TaxiEnv(Env):
         self.locs = locs = [(0, 0), (0, 4), (4, 0), (4, 3)]
         self.locs_colors = [(255, 0, 0), (0, 255, 0), (255, 255, 0), (0, 0, 255)]
 
-        num_states = 500
+        num_states = 500 * 4 * 5 * 2 * 2
         num_rows = 5
         num_columns = 5
         max_row = num_rows - 1
@@ -177,46 +177,64 @@ class TaxiEnv(Env):
             for col in range(num_columns):
                 for pass_idx in range(len(locs) + 1):  # +1 for being inside taxi
                     for dest_idx in range(len(locs)):
-                        state = self.encode(row, col, pass_idx, dest_idx)
-                        if pass_idx < 4 and pass_idx != dest_idx:
-                            self.initial_state_distrib[state] += 1
-                        for action in range(num_actions):
-                            # defaults
-                            new_row, new_col, new_pass_idx = row, col, pass_idx
-                            reward = (
-                                -1
-                            )  # default reward when there is no pickup/dropoff
-                            terminated = False
-                            taxi_loc = (row, col)
+                        for sec_pass_idx in range(len(locs) + 1):  # +1 for being inside taxi
+                            for sec_dest_idx in range(len(locs)):
+                                state = self.encode(row, col, pass_idx, dest_idx, sec_pass_idx, sec_dest_idx)
+                                if pass_idx < 4 and pass_idx != dest_idx and pass_idx != sec_dest_idx:
+                                    self.initial_state_distrib[state] += 1
+                                if sec_pass_idx < 4 and sec_pass_idx != dest_idx and sec_pass_idx != sec_dest_idx:
+                                    self.initial_state_distrib[state] += 1
+                                for action in range(num_actions):
+                                    # defaults
+                                    new_row, new_col, new_pass_idx, new_sec_pass_idx = row, col, pass_idx, sec_pass_idx
+                                    reward = (
+                                        -1
+                                    )  # default reward when there is no pickup/dropoff
+                                    terminated = False
+                                    taxi_loc = (row, col)
 
-                            if action == 0:
-                                new_row = min(row + 1, max_row)
-                            elif action == 1:
-                                new_row = max(row - 1, 0)
-                            if action == 2 and self.desc[1 + row, 2 * col + 2] == b":":
-                                new_col = min(col + 1, max_col)
-                            elif action == 3 and self.desc[1 + row, 2 * col] == b":":
-                                new_col = max(col - 1, 0)
-                            elif action == 4:  # pickup
-                                if pass_idx < 4 and taxi_loc == locs[pass_idx]:
-                                    new_pass_idx = 4
-                                else:  # passenger not at location
-                                    reward = -10
-                            elif action == 5:  # dropoff
-                                if (taxi_loc == locs[dest_idx]) and pass_idx == 4:
-                                    new_pass_idx = dest_idx
-                                    terminated = True
-                                    reward = 20
-                                elif (taxi_loc in locs) and pass_idx == 4:
-                                    new_pass_idx = locs.index(taxi_loc)
-                                else:  # dropoff at wrong location
-                                    reward = -10
-                            new_state = self.encode(
-                                new_row, new_col, new_pass_idx, dest_idx
-                            )
-                            self.P[state][action].append(
-                                (1.0, new_state, reward, terminated)
-                            )
+                                    if action == 0:
+                                        new_row = min(row + 1, max_row)
+                                    elif action == 1:
+                                        new_row = max(row - 1, 0)
+                                    if action == 2 and self.desc[1 + row, 2 * col + 2] == b":":
+                                        new_col = min(col + 1, max_col)
+                                    elif action == 3 and self.desc[1 + row, 2 * col] == b":":
+                                        new_col = max(col - 1, 0)
+                                    elif action == 4:  # pickup
+                                        if pass_idx < 4 and taxi_loc == locs[pass_idx] and pass_idx != dest_idx:
+                                            new_pass_idx = 4
+                                        elif sec_pass_idx < 4 and taxi_loc == locs[sec_pass_idx] and sec_pass_idx != sec_dest_idx:
+                                            new_sec_pass_idx = 4
+                                        else:  # passenger not at location
+                                            reward = -10
+                                    elif action == 5:  # dropoff
+                                        if (taxi_loc == locs[dest_idx]) and pass_idx == 4:
+                                            new_pass_idx = dest_idx
+                                            reward = 10
+                                        elif (taxi_loc == locs[sec_dest_idx]) and sec_pass_idx == 4:
+                                            new_sec_pass_idx = sec_dest_idx
+                                            reward = 10
+                                        elif (taxi_loc in locs) and (pass_idx == 4 or sec_pass_idx == 4):
+                                            if pass_idx == 4:
+                                                new_pass_idx = locs.index(taxi_loc)
+                                            if sec_pass_idx == 4:
+                                                new_sec_pass_idx = locs.index(taxi_loc)
+                                        else:  # dropoff at wrong location
+                                            reward = -10
+                                            if pass_idx == 4 or new_pass_idx == 4:
+                                                reward += -20
+                                            if sec_pass_idx or new_sec_pass_idx == 4:
+                                                reward += -20
+                                    if (new_sec_pass_idx == sec_dest_idx and new_pass_idx == dest_idx):
+                                        reward = 50
+                                        terminated = True
+                                    new_state = self.encode(
+                                        new_row, new_col, new_pass_idx, dest_idx, new_sec_pass_idx, sec_dest_idx
+                                    )
+                                    self.P[state][action].append(
+                                        (1.0, new_state, reward, terminated)
+                                    )
         self.initial_state_distrib /= self.initial_state_distrib.sum()
         self.action_space = spaces.Discrete(num_actions)
         self.observation_space = spaces.Discrete(num_states)
@@ -238,8 +256,8 @@ class TaxiEnv(Env):
         self.median_vert = None
         self.background_img = None
 
-    def encode(self, taxi_row, taxi_col, pass_loc, dest_idx):
-        # (5) 5, 5, 4
+    def encode(self, taxi_row, taxi_col, pass_loc, dest_idx, second_loc=None, second_dest=None):
+        # (5) 5, 5, 4, 5, 4
         i = taxi_row
         i *= 5
         i += taxi_col
@@ -247,10 +265,19 @@ class TaxiEnv(Env):
         i += pass_loc
         i *= 4
         i += dest_idx
+        if second_loc is not None and second_dest is not None:
+            i *= 5
+            i += second_loc
+            i *= 4
+            i += second_dest
         return i
 
     def decode(self, i):
         out = []
+        out.append(i % 4)
+        i = i // 4
+        out.append(i % 5)
+        i = i // 5
         out.append(i % 4)
         i = i // 4
         out.append(i % 5)
@@ -264,7 +291,7 @@ class TaxiEnv(Env):
     def action_mask(self, state: int):
         """Computes an action mask for the action space using the state information."""
         mask = np.zeros(6, dtype=np.int8)
-        taxi_row, taxi_col, pass_loc, dest_idx = self.decode(state)
+        taxi_row, taxi_col, pass_loc, dest_idx, sec_pass_loc, sec_dest_idx = self.decode(state)
         if taxi_row < 4:
             mask[0] = 1
         if taxi_row > 0:
@@ -273,10 +300,17 @@ class TaxiEnv(Env):
             mask[2] = 1
         if taxi_col > 0 and self.desc[taxi_row + 1, 2 * taxi_col] == b":":
             mask[3] = 1
-        if pass_loc < 4 and (taxi_row, taxi_col) == self.locs[pass_loc]:
+        if pass_loc < 4 and (taxi_row, taxi_col) == self.locs[pass_loc] and self.locs[pass_loc] != self.locs[dest_idx]:
+            mask[4] = 1
+        if sec_pass_loc < 4 and (taxi_row, taxi_col) == self.locs[sec_pass_loc] and self.locs[sec_pass_loc] != self.locs[sec_dest_idx]:
             mask[4] = 1
         if pass_loc == 4 and (
             (taxi_row, taxi_col) == self.locs[dest_idx]
+            or (taxi_row, taxi_col) in self.locs
+        ):
+            mask[5] = 1
+        if sec_pass_loc == 4 and (
+            (taxi_row, taxi_col) == self.locs[sec_dest_idx]
             or (taxi_row, taxi_col) in self.locs
         ):
             mask[5] = 1
@@ -422,15 +456,21 @@ class TaxiEnv(Env):
             loc = self.get_surf_loc(cell)
             self.window.blit(color_cell, (loc[0], loc[1] + 10))
 
-        taxi_row, taxi_col, pass_idx, dest_idx = self.decode(self.s)
+        taxi_row, taxi_col, pass_idx, dest_idx, sec_pass_idx, sec_dest_idx = self.decode(self.s)
 
         if pass_idx < 4:
             self.window.blit(self.passenger_img, self.get_surf_loc(self.locs[pass_idx]))
+        if sec_pass_idx < 4:
+            self.window.blit(self.passenger_img, self.get_surf_loc(self.locs[sec_pass_idx]))
 
         if self.lastaction in [0, 1, 2, 3]:
             self.taxi_orientation = self.lastaction
         dest_loc = self.get_surf_loc(self.locs[dest_idx])
+        sec_dest_loc = self.get_surf_loc(self.locs[sec_dest_idx])
         taxi_location = self.get_surf_loc((taxi_row, taxi_col))
+
+        if self.taxi_orientation is None:
+            self.taxi_orientation = 0
 
         if dest_loc[1] <= taxi_location[1]:
             self.window.blit(
@@ -443,6 +483,18 @@ class TaxiEnv(Env):
             self.window.blit(
                 self.destination_img,
                 (dest_loc[0], dest_loc[1] - self.cell_size[1] // 2),
+            )
+        if sec_dest_loc[1] <= taxi_location[1]:
+            self.window.blit(
+                self.destination_img,
+                (sec_dest_loc[0], sec_dest_loc[1] - self.cell_size[1] // 2),
+            )
+            self.window.blit(self.taxi_imgs[self.taxi_orientation], taxi_location)
+        else:
+            self.window.blit(self.taxi_imgs[self.taxi_orientation], taxi_location)
+            self.window.blit(
+                self.destination_img,
+                (sec_dest_loc[0], sec_dest_loc[1] - self.cell_size[1] // 2),
             )
 
         if mode == "human":
@@ -463,7 +515,7 @@ class TaxiEnv(Env):
         outfile = StringIO()
 
         out = [[c.decode("utf-8") for c in line] for line in desc]
-        taxi_row, taxi_col, pass_idx, dest_idx = self.decode(self.s)
+        taxi_row, taxi_col, pass_idx, dest_idx, sec_pass_idx, sec_dest_idx = self.decode(self.s)
 
         def ul(x):
             return "_" if x == " " else x
@@ -481,8 +533,22 @@ class TaxiEnv(Env):
                 ul(out[1 + taxi_row][2 * taxi_col + 1]), "green", highlight=True
             )
 
+        if sec_pass_idx < 4:
+            pi, pj = self.locs[sec_pass_idx]
+            out[1 + pi][2 * pj + 1] = utils.colorize(
+                out[1 + pi][2 * pj + 1], "blue", bold=True
+            )
+        else:  # passenger in taxi
+            out[1 + taxi_row][2 * taxi_col + 1] = utils.colorize(
+                ul(out[1 + taxi_row][2 * taxi_col + 1]), "green", highlight=True
+            )
+
         di, dj = self.locs[dest_idx]
         out[1 + di][2 * dj + 1] = utils.colorize(out[1 + di][2 * dj + 1], "magenta")
+
+        if sec_dest_idx != dest_idx:
+            di, dj = self.locs[sec_dest_idx]
+            out[1 + di][2 * dj + 1] = utils.colorize(out[1 + di][2 * dj + 1], "orange")
         outfile.write("\n".join(["".join(row) for row in out]) + "\n")
         if self.lastaction is not None:
             outfile.write(
